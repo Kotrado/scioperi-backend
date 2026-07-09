@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct AvvisiListView: View {
+    @EnvironmentObject private var notifiche: NotificheManager
     @State private var avvisi: [AvvisoOut] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -25,7 +26,7 @@ struct AvvisiListView: View {
                 } else {
                     List {
                         ForEach(avvisi) { avviso in
-                            AvvisoRow(avviso: avviso)
+                            AvvisoRow(avviso: avviso, matchCount: notifiche.matchCount(perAvvisoId: avviso.id))
                         }
                         .onDelete(perform: elimina)
                     }
@@ -44,8 +45,19 @@ struct AvvisiListView: View {
             .sheet(isPresented: $mostraNuovoAvviso) {
                 NuovoAvvisoView { Task { await load() } }
             }
-            .task { await load() }
-            .refreshable { await load() }
+            .task {
+                await load()
+                await notifiche.controllaNuoviMatch()
+            }
+            .refreshable {
+                await load()
+                await notifiche.controllaNuoviMatch()
+            }
+            .onDisappear {
+                // L'utente ha visto la lista (con gli eventuali conteggi match
+                // accanto ad ogni avviso) -- il badge puo' azzerarsi.
+                notifiche.segnaComeVisti()
+            }
         }
     }
 
@@ -74,12 +86,26 @@ struct AvvisiListView: View {
 
 private struct AvvisoRow: View {
     let avviso: AvvisoOut
+    let matchCount: Int
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(periodoLabel)
-                .font(.subheadline)
-                .fontWeight(.semibold)
+            HStack {
+                Text(periodoLabel)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Spacer()
+                if matchCount > 0 {
+                    Text(matchCount == 1 ? "1 sciopero" : "\(matchCount) scioperi")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.orange)
+                        .clipShape(Capsule())
+                }
+            }
             Text(avviso.settori.joined(separator: ", "))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -107,4 +133,5 @@ private struct AvvisoRow: View {
 
 #Preview {
     AvvisiListView()
+        .environmentObject(NotificheManager.shared)
 }

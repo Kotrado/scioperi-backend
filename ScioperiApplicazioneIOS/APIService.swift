@@ -112,6 +112,14 @@ final class APIService {
         let _: OkResponse = try await performRequest(request: request)
     }
 
+    /// GET /avvisi-con-nuovi-match -- tutti gli avvisi attivi che hanno
+    /// almeno uno sciopero corrispondente al momento. Usato per il badge
+    /// locale (nessuna push, solo controllo quando l'app e' in foreground).
+    func fetchAvvisiConNuoviMatch() async throws -> [AvvisoConMatch] {
+        let url = baseURL.appendingPathComponent("avvisi-con-nuovi-match")
+        return try await performRequest(url: url)
+    }
+
     // MARK: - Helper generico
 
     private func performRequest<T: Decodable>(url: URL) async throws -> T {
