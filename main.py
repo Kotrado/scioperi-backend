@@ -9,9 +9,10 @@ Documentazione interattiva auto-generata:
 """
 
 from datetime import date
+import os
 from typing import List, Optional
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Header
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
@@ -21,6 +22,8 @@ from models import Sciopero, Avviso
 from regioni_province import (
     elenco_regioni, elenco_province, REGIONE_NAZIONALE, PROVINCIA_TUTTE,
 )
+from fetch_scioperi import fetch_html, parse_scioperi
+from import_scioperi import importa_records
 
 app = FastAPI(title="Scioperi API", version="0.1")
 
@@ -120,6 +123,11 @@ def query_scioperi(
 # --------------------------------------------------------------------------
 # Endpoint: dropdown regioni/province (dati statici, per il form dell'app)
 # --------------------------------------------------------------------------
+
+@app.get("/")
+def health_check():
+    return {"status": "ok", "service": "scioperi-api"}
+
 
 @app.get("/regioni", response_model=List[str])
 def get_regioni():
@@ -223,3 +231,41 @@ def avvisi_con_nuovi_match(db: Session = Depends(get_db)):
             risultati.append(AvvisoConMatch(avviso=avviso, scioperi_corrispondenti=match))
 
     return risultati
+
+
+# --------------------------------------------------------------------------
+# Endpoint di refresh: fa scraping del sito MIT + import nel DB, tutto nel
+# processo del backend gia' deployato (niente bisogno di un servizio cron
+# separato a pagamento). Protetto da un token segreto passato come header,
+# da chiamare periodicamente da uno scheduler esterno gratuito (es. GitHub
+# Actions con un workflow schedulato).
+# --------------------------------------------------------------------------
+
+class RefreshResult(BaseModel):
+    scioperi_trovati: int
+    nuovi: int
+    aggiornati: int
+
+
+@app.post("/admin/refresh", response_model=RefreshResult)
+def refresh_scioperi(
+    x_admin_token: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    token_atteso = os.environ.get("ADMIN_TOKEN")
+    if not token_atteso:
+        raise HTTPException(
+            status_code=500,
+            detail="ADMIN_TOKEN non configurato lato server -- imposta la variabile "
+                   "d'ambiente su Render prima di usare questo endpoint.",
+        )
+    if x_admin_token != token_atteso:
+        raise HTTPException(status_code=401, detail="Token non valido")
+
+    html = fetch_html()
+    records = parse_scioperi(html)
+    nuovi, aggiornati = importa_records(db, records)
+
+    return RefreshResult(
+        scioperi_trovati=len(records), nuovi=nuovi, aggiornati=aggiornati
+    )

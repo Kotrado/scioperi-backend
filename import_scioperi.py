@@ -1,16 +1,20 @@
 """
 Importa gli scioperi nel database a partire dal JSON prodotto da fetch_scioperi.py.
 
-Uso tipico (pipeline completa):
-    python ../scioperi_scraper/fetch_scioperi.py --json /tmp/scioperi.json
+Uso tipico (import manuale da file, utile in locale):
+    python fetch_scioperi.py --json /tmp/scioperi.json
     python import_scioperi.py /tmp/scioperi.json
 
-Puo' essere schedulato via cron insieme al fetch, ogni 3-6 ore.
+In produzione, l'import viene invece fatto dall'endpoint POST /admin/refresh
+(vedi main.py), che chiama importa_records() direttamente senza passare da
+un file JSON intermedio -- questo file resta utile per l'uso locale/debug.
 """
 
 import json
 import sys
-from datetime import datetime, date
+from datetime import datetime, date, timezone
+
+from sqlalchemy.orm import Session
 
 from database import SessionLocal, init_db
 from models import Sciopero
@@ -28,13 +32,9 @@ def _parse_datetime(value: str) -> datetime | None:
     return datetime.fromisoformat(value)
 
 
-def importa(json_path: str):
-    init_db()
-    db = SessionLocal()
-
-    with open(json_path, "r", encoding="utf-8") as f:
-        records = json.load(f)
-
+def importa_records(db: Session, records: list[dict]) -> tuple[int, int]:
+    """Upsert di una lista di record (dict, stesso formato del JSON dello
+    scraper) nel database. Ritorna (nuovi, aggiornati)."""
     nuovi, aggiornati = 0, 0
 
     for r in records:
@@ -80,15 +80,27 @@ def importa(json_path: str):
         if esistente:
             for k, v in campi.items():
                 setattr(esistente, k, v)
-            esistente.aggiornato_il = datetime.utcnow()
+            esistente.aggiornato_il = datetime.now(timezone.utc)
             aggiornati += 1
         else:
             db.add(Sciopero(**campi))
             nuovi += 1
 
     db.commit()
-    db.close()
-    print(f"Import completato: {nuovi} nuovi, {aggiornati} aggiornati.", file=sys.stderr)
+    return nuovi, aggiornati
+
+
+def importa(json_path: str):
+    """Import da file JSON, per uso locale/manuale da riga di comando."""
+    init_db()
+    db = SessionLocal()
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            records = json.load(f)
+        nuovi, aggiornati = importa_records(db, records)
+        print(f"Import completato: {nuovi} nuovi, {aggiornati} aggiornati.", file=sys.stderr)
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

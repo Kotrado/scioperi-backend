@@ -1,4 +1,11 @@
+# Backend (API)
 fastapi>=0.110
 uvicorn[standard]>=0.29
 sqlalchemy>=2.0
 pydantic>=2.6
+psycopg2-binary>=2.9
+
+# Scraper (fetch_scioperi.py)
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0

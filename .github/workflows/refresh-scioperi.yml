@@ -1,0 +1,24 @@
+name: Refresh scioperi
+
+on:
+  schedule:
+    # Ogni 4 ore. Sintassi cron: minuto ora giorno mese giorno-settimana (UTC).
+    - cron: "0 */4 * * *"
+  workflow_dispatch: {}  # permette anche il trigger manuale da GitHub UI
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chiama /admin/refresh
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            "${{ secrets.SCIOPERI_API_URL }}/admin/refresh" \
+            -H "X-Admin-Token: ${{ secrets.ADMIN_TOKEN }}")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "Risposta ($http_code): $body"
+          if [ "$http_code" -ne 200 ]; then
+            echo "Refresh fallito con status $http_code"
+            exit 1
+          fi
