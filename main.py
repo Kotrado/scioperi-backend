@@ -18,12 +18,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 
 from database import get_db, init_db
-from models import Sciopero, Avviso
+from models import Sciopero, Avviso, DeviceToken
 from regioni_province import (
     elenco_regioni, elenco_province, REGIONE_NAZIONALE, PROVINCIA_TUTTE,
 )
 from fetch_scioperi import fetch_html, parse_scioperi
 from import_scioperi import importa_records
+from matching import query_scioperi
+from notifiche_push import notifica_nuovi_match
 
 app = FastAPI(title="Scioperi API", version="0.1")
 
@@ -85,39 +87,18 @@ class AvvisoConMatch(BaseModel):
     scioperi_corrispondenti: List[ScioperoOut]
 
 
-# --------------------------------------------------------------------------
-# Logica di matching condivisa tra creazione avviso e ricerca calendario
-# --------------------------------------------------------------------------
+class DeviceTokenIn(BaseModel):
+    utente_id: str
+    token: str
 
-def query_scioperi(
-    db: Session,
-    da: date,
-    a: date,
-    settori: Optional[List[str]] = None,
-    regione: Optional[str] = None,
-    provincia: Optional[str] = None,
-):
-    q = db.query(Sciopero).filter(
-        Sciopero.inizio_data <= a,
-        Sciopero.fine_data >= da,
-    )
 
-    if settori and "Tutti" not in settori:
-        q = q.filter(Sciopero.settore.in_(settori))
-
-    if regione:
-        # Include sempre gli scioperi a copertura nazionale, oltre a quelli
-        # della regione specifica richiesta.
-        q = q.filter(
-            or_(Sciopero.regione == regione, Sciopero.regione == REGIONE_NAZIONALE)
-        )
-
-    if provincia:
-        q = q.filter(
-            or_(Sciopero.provincia == provincia, Sciopero.provincia == PROVINCIA_TUTTE)
-        )
-
-    return q.order_by(Sciopero.inizio_data.asc()).all()
+class RefreshResult(BaseModel):
+    scioperi_trovati: int
+    nuovi: int
+    aggiornati: int
+    notifiche_inviate: int
+    notifiche_fallite: int
+    match_senza_token: int
 
 
 # --------------------------------------------------------------------------
@@ -213,8 +194,7 @@ def elimina_avviso(avviso_id: int, db: Session = Depends(get_db)):
 
 # --------------------------------------------------------------------------
 # Endpoint di supporto: ricontrolla tutti gli avvisi attivi contro i dati
-# correnti. Da chiamare (o schedulare) subito dopo ogni import_scioperi.py,
-# per generare le notifiche push da inviare.
+# correnti (usato dall'app per il badge in-app).
 # --------------------------------------------------------------------------
 
 @app.get("/avvisi-con-nuovi-match", response_model=List[AvvisoConMatch])
@@ -234,18 +214,27 @@ def avvisi_con_nuovi_match(db: Session = Depends(get_db)):
 
 
 # --------------------------------------------------------------------------
-# Endpoint di refresh: fa scraping del sito MIT + import nel DB, tutto nel
-# processo del backend gia' deployato (niente bisogno di un servizio cron
-# separato a pagamento). Protetto da un token segreto passato come header,
-# da chiamare periodicamente da uno scheduler esterno gratuito (es. GitHub
-# Actions con un workflow schedulato).
+# Endpoint: registrazione device token per le notifiche push
 # --------------------------------------------------------------------------
 
-class RefreshResult(BaseModel):
-    scioperi_trovati: int
-    nuovi: int
-    aggiornati: int
+@app.post("/device-token")
+def registra_device_token(payload: DeviceTokenIn, db: Session = Depends(get_db)):
+    esistente = db.query(DeviceToken).filter_by(token=payload.token).first()
+    if esistente:
+        esistente.utente_id = payload.utente_id
+    else:
+        db.add(DeviceToken(utente_id=payload.utente_id, token=payload.token))
+    db.commit()
+    return {"ok": True}
 
+
+# --------------------------------------------------------------------------
+# Endpoint di refresh: fa scraping del sito MIT + import nel DB + invio
+# delle notifiche push per i nuovi match, tutto nel processo del backend
+# gia' deployato. Protetto da un token segreto passato come header, da
+# chiamare periodicamente da uno scheduler esterno gratuito (GitHub
+# Actions con un workflow schedulato).
+# --------------------------------------------------------------------------
 
 @app.post("/admin/refresh", response_model=RefreshResult)
 def refresh_scioperi(
@@ -266,6 +255,11 @@ def refresh_scioperi(
     records = parse_scioperi(html)
     nuovi, aggiornati = importa_records(db, records)
 
+    risultato_notifiche = notifica_nuovi_match(db)
+
     return RefreshResult(
-        scioperi_trovati=len(records), nuovi=nuovi, aggiornati=aggiornati
+        scioperi_trovati=len(records),
+        nuovi=nuovi,
+        aggiornati=aggiornati,
+        **risultato_notifiche,
     )
