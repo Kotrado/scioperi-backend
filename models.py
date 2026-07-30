@@ -1,8 +1,9 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, Integer, String, Date, DateTime, Boolean, Text, JSON, UniqueConstraint
+    Column, Integer, String, Date, DateTime, Boolean, Text, JSON, UniqueConstraint, ForeignKey
 )
+
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -64,3 +65,24 @@ class Avviso(Base):
 
     attivo = Column(Boolean, default=True)
     creato_il = Column(DateTime, default=datetime.utcnow)
+
+class DeviceToken(Base):
+    __tablename__ = "device_tokens"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    utente_id = Column(String, nullable=False, index=True)
+    token = Column(String, nullable=False, unique=True)
+    creato_il = Column(DateTime, default=datetime.utcnow)
+
+
+class NotificaInviata(Base):
+    __tablename__ = "notifiche_inviate"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    avviso_id = Column(Integer, ForeignKey("avvisi.id"), nullable=False)
+    sciopero_id = Column(Integer, ForeignKey("scioperi.id"), nullable=False)
+    inviata_il = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("avviso_id", "sciopero_id", name="uq_notifica_avviso_sciopero"),
+    )
