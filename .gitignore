@@ -1,1 +1,6 @@
 .DS_Store
+venv/
+*.p8
+*.rtf
+id_ed25519*
+.DS_Store
