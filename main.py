@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 
 from database import get_db, init_db
-from models import Sciopero, Avviso, DeviceToken
+from models import Sciopero, Avviso, DeviceToken, NotificaInviata
 from regioni_province import (
     elenco_regioni, elenco_province, REGIONE_NAZIONALE, PROVINCIA_TUTTE,
 )
@@ -187,6 +187,12 @@ def elimina_avviso(avviso_id: int, db: Session = Depends(get_db)):
     avviso = db.query(Avviso).filter(Avviso.id == avviso_id).first()
     if not avviso:
         raise HTTPException(status_code=404, detail="Avviso non trovato")
+
+    # Rimuovi prima le eventuali notifiche gia' inviate collegate a questo
+    # avviso -- altrimenti il vincolo di chiave esterna su NotificaInviata
+    # blocca la cancellazione con un errore 500.
+    db.query(NotificaInviata).filter(NotificaInviata.avviso_id == avviso_id).delete()
+
     db.delete(avviso)
     db.commit()
     return {"ok": True}
