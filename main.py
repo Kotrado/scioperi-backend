@@ -90,6 +90,10 @@ class AvvisoConMatch(BaseModel):
 class DeviceTokenIn(BaseModel):
     utente_id: str
     token: str
+    # "ios" o "android". Default "ios" per compatibilita' con eventuali
+    # client vecchi (l'app iOS gia' pubblicata) che non mandano ancora
+    # questo campo esplicitamente.
+    platform: str = "ios"
 
 
 class RefreshResult(BaseModel):
@@ -204,9 +208,13 @@ def elimina_avviso(avviso_id: int, db: Session = Depends(get_db)):
 # --------------------------------------------------------------------------
 
 @app.get("/avvisi-con-nuovi-match", response_model=List[AvvisoConMatch])
-def avvisi_con_nuovi_match(db: Session = Depends(get_db)):
+def avvisi_con_nuovi_match(utente_id: str, db: Session = Depends(get_db)):
     risultati = []
-    avvisi_attivi = db.query(Avviso).filter(Avviso.attivo == True).all()  # noqa: E712
+    avvisi_attivi = (
+        db.query(Avviso)
+        .filter(Avviso.attivo == True, Avviso.utente_id == utente_id)  # noqa: E712
+        .all()
+    )
 
     for avviso in avvisi_attivi:
         match = query_scioperi(
@@ -228,8 +236,13 @@ def registra_device_token(payload: DeviceTokenIn, db: Session = Depends(get_db))
     esistente = db.query(DeviceToken).filter_by(token=payload.token).first()
     if esistente:
         esistente.utente_id = payload.utente_id
+        esistente.platform = payload.platform
     else:
-        db.add(DeviceToken(utente_id=payload.utente_id, token=payload.token))
+        db.add(DeviceToken(
+            utente_id=payload.utente_id,
+            token=payload.token,
+            platform=payload.platform,
+        ))
     db.commit()
     return {"ok": True}
 

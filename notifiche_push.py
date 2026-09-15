@@ -7,10 +7,14 @@ scatena il refresh (ogni 4 ore).
 
 La tabella NotificaInviata tiene traccia di cosa e' gia' stato notificato
 per evitare di rimandare la stessa notifica ad ogni refresh successivo.
+
+Supporta sia token iOS (via APNs) sia Android (via FCM) -- il campo
+DeviceToken.platform decide quale servizio usare per ogni token.
 """
 from sqlalchemy.orm import Session
 
 from apns_client import invia_push
+from fcm_client import invia_push_fcm
 from matching import query_scioperi
 from models import Avviso, DeviceToken, NotificaInviata
 
@@ -45,13 +49,14 @@ def notifica_nuovi_match(db: Session) -> dict:
                 titolo = f"Sciopero {sciopero.settore}"
                 corpo_categoria = sciopero.categoria or sciopero.settore
                 corpo = f"{sciopero.inizio_data.strftime('%d/%m')}: {corpo_categoria}"
+                dati = {"sciopero_id": sciopero.id, "avviso_id": avviso.id}
 
                 almeno_uno_riuscito = False
                 for dt in tokens:
-                    inviata = invia_push(
-                        dt.token, titolo, corpo,
-                        {"sciopero_id": sciopero.id, "avviso_id": avviso.id},
-                    )
+                    if dt.platform == "android":
+                        inviata = invia_push_fcm(dt.token, titolo, corpo, dati)
+                    else:
+                        inviata = invia_push(dt.token, titolo, corpo, dati)
                     almeno_uno_riuscito = almeno_uno_riuscito or inviata
 
                 if almeno_uno_riuscito:

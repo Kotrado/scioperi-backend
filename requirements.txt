@@ -12,3 +12,6 @@ lxml>=5.0
 
 pyjwt[crypto]>=2.8
 httpx[http2]>=0.27
+
+# Notifiche push Android (FCM)
+firebase-admin>=6.5

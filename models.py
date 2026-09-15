@@ -72,6 +72,10 @@ class DeviceToken(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     utente_id = Column(String, nullable=False, index=True)
     token = Column(String, nullable=False, unique=True)
+    # "ios" o "android" -- decide quale servizio push usare (APNs o FCM).
+    # Default "ios" per compatibilita' con i token gia' salvati prima di
+    # questo campo (tutti erano iOS, dato che l'app Android non esisteva).
+    platform = Column(String, nullable=False, default="ios")
     creato_il = Column(DateTime, default=datetime.utcnow)
 
 
