@@ -186,6 +186,32 @@ def lista_avvisi(utente_id: str, db: Session = Depends(get_db)):
     )
 
 
+@app.put("/avvisi/{avviso_id}", response_model=AvvisoConMatch)
+def aggiorna_avviso(avviso_id: int, payload: AvvisoIn, db: Session = Depends(get_db)):
+    if payload.data_fine < payload.data_inizio:
+        raise HTTPException(status_code=400, detail="data_fine deve essere >= data_inizio")
+
+    avviso = db.query(Avviso).filter(Avviso.id == avviso_id).first()
+    if not avviso:
+        raise HTTPException(status_code=404, detail="Avviso non trovato")
+    if avviso.utente_id != payload.utente_id:
+        raise HTTPException(status_code=403, detail="Avviso non appartenente a questo utente")
+
+    avviso.data_inizio = payload.data_inizio
+    avviso.data_fine = payload.data_fine
+    avviso.settori = payload.settori
+    avviso.regione = payload.regione
+    avviso.provincia = payload.provincia
+    db.commit()
+    db.refresh(avviso)
+
+    match = query_scioperi(
+        db, avviso.data_inizio, avviso.data_fine,
+        avviso.settori, avviso.regione, avviso.provincia,
+    )
+    return AvvisoConMatch(avviso=avviso, scioperi_corrispondenti=match)
+
+
 @app.delete("/avvisi/{avviso_id}")
 def elimina_avviso(avviso_id: int, db: Session = Depends(get_db)):
     avviso = db.query(Avviso).filter(Avviso.id == avviso_id).first()
