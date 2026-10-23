@@ -23,6 +23,7 @@ import argparse
 import json
 import re
 import sys
+import time
 from datetime import datetime, date, timedelta
 
 import requests
@@ -52,8 +53,19 @@ COLUMNS = [
 ]
 
 
+# Pause (secondi) prima di ciascun nuovo tentativo: 1 tentativo + 2 retry.
+RETRY_BACKOFF = (5, 15)
+
+
 def fetch_html(url: str = BASE_URL) -> str:
-    resp = requests.get(url, headers=HEADERS, timeout=20)
+    for attesa in (*RETRY_BACKOFF, None):
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=(10, 30))
+            break
+        except (requests.ConnectTimeout, requests.ReadTimeout, requests.ConnectionError):
+            if attesa is None:
+                raise
+            time.sleep(attesa)
     resp.raise_for_status()
     return resp.text
 

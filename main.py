@@ -8,17 +8,20 @@ Documentazione interattiva auto-generata:
     http://127.0.0.1:8000/docs
 """
 
-from datetime import date
+from datetime import date, datetime
+import logging
 import os
 from typing import List, Optional
 
+import requests
 from fastapi import FastAPI, Depends, HTTPException, Header
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 
 from database import get_db, init_db
-from models import Sciopero, Avviso, DeviceToken, NotificaInviata
+from models import Sciopero, Avviso, DeviceToken, NotificaInviata, RefreshState
 from regioni_province import (
     elenco_regioni, elenco_province, REGIONE_NAZIONALE, PROVINCIA_TUTTE,
 )
@@ -281,11 +284,10 @@ def registra_device_token(payload: DeviceTokenIn, db: Session = Depends(get_db))
 # Actions con un workflow schedulato).
 # --------------------------------------------------------------------------
 
-@app.post("/admin/refresh", response_model=RefreshResult)
-def refresh_scioperi(
-    x_admin_token: Optional[str] = Header(None),
-    db: Session = Depends(get_db),
-):
+logger = logging.getLogger(__name__)
+
+
+def _verifica_admin(x_admin_token: Optional[str]):
     token_atteso = os.environ.get("ADMIN_TOKEN")
     if not token_atteso:
         raise HTTPException(
@@ -296,11 +298,31 @@ def refresh_scioperi(
     if x_admin_token != token_atteso:
         raise HTTPException(status_code=401, detail="Token non valido")
 
-    html = fetch_html()
+
+@app.post("/admin/refresh", response_model=RefreshResult)
+def refresh_scioperi(
+    x_admin_token: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _verifica_admin(x_admin_token)
+
+    try:
+        html = fetch_html()
+    except requests.RequestException as e:
+        logger.warning("Portale MIT non raggiungibile: %s", e)
+        return JSONResponse(status_code=502, content={"detail": "MIT portal unreachable"})
     records = parse_scioperi(html)
     nuovi, aggiornati = importa_records(db, records)
 
     risultato_notifiche = notifica_nuovi_match(db)
+
+    # Solo a run completato (fetch, parse, import e notifiche).
+    stato = db.get(RefreshState, 1)
+    if stato is None:
+        stato = RefreshState(id=1)
+        db.add(stato)
+    stato.last_success_at = datetime.utcnow()
+    db.commit()
 
     return RefreshResult(
         scioperi_trovati=len(records),
@@ -308,3 +330,18 @@ def refresh_scioperi(
         aggiornati=aggiornati,
         **risultato_notifiche,
     )
+
+
+@app.get("/admin/status")
+def admin_status(
+    x_admin_token: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    _verifica_admin(x_admin_token)
+
+    stato = db.get(RefreshState, 1)
+    last = stato.last_success_at if stato else None
+    if last is None:
+        return {"last_success_at": None, "age_hours": None}
+    age_hours = (datetime.utcnow() - last).total_seconds() / 3600
+    return {"last_success_at": last.isoformat() + "Z", "age_hours": age_hours}

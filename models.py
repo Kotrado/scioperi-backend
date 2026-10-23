@@ -90,3 +90,11 @@ class NotificaInviata(Base):
     __table_args__ = (
         UniqueConstraint("avviso_id", "sciopero_id", name="uq_notifica_avviso_sciopero"),
     )
+
+
+class RefreshState(Base):
+    __tablename__ = "refresh_state"
+
+    # Una sola riga (id=1): ultimo refresh completato con successo (UTC).
+    id = Column(Integer, primary_key=True)
+    last_success_at = Column(DateTime, nullable=True)

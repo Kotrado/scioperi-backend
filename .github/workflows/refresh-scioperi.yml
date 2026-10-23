@@ -12,13 +12,36 @@ jobs:
     steps:
       - name: Chiama /admin/refresh
         run: |
-          response=$(curl -s -w "\n%{http_code}" -X POST \
+          response=$(curl -s --max-time 120 -w "\n%{http_code}" -X POST \
             "${{ secrets.SCIOPERI_API_URL }}/admin/refresh" \
             -H "X-Admin-Token: ${{ secrets.ADMIN_TOKEN }}")
           http_code=$(echo "$response" | tail -n1)
           body=$(echo "$response" | sed '$d')
           echo "Risposta ($http_code): $body"
-          if [ "$http_code" -ne 200 ]; then
+          if [ "$http_code" -ne 200 ] && [ "$http_code" -ne 502 ]; then
             echo "Refresh fallito con status $http_code"
             exit 1
           fi
+
+      - name: Check data freshness
+        if: always()
+        run: |
+          response=$(curl -s --max-time 60 -w "\n%{http_code}" \
+            "${{ secrets.SCIOPERI_API_URL }}/admin/status" \
+            -H "X-Admin-Token: ${{ secrets.ADMIN_TOKEN }}")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          if [ "$http_code" != "200" ]; then
+            echo "::warning::Status check non riuscito (status $http_code), salto il controllo"
+            exit 0
+          fi
+          age=$(echo "$body" | jq -r '.age_hours // empty')
+          if [ -z "$age" ]; then
+            echo "::warning::Nessun refresh riuscito registrato (last_success_at null), salto il controllo"
+            exit 0
+          fi
+          if echo "$body" | jq -e '.age_hours > 24' > /dev/null; then
+            echo "Dati non aggiornati da ${age%%.*} ore"
+            exit 1
+          fi
+          echo "Dati aggiornati ($age ore fa)"
