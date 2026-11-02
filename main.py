@@ -15,6 +15,7 @@ from typing import List, Optional
 
 import requests
 from fastapi import FastAPI, Depends, HTTPException, Header
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -31,6 +32,16 @@ from matching import query_scioperi
 from notifiche_push import notifica_nuovi_match
 
 app = FastAPI(title="Scioperi API", version="0.1")
+
+# CORS: solo lettura (GET) dal sito pubblico, per la pagina "Scioperi oggi e domani".
+# Le app mobile non usano CORS. Nessun cookie/credenziale.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://aportsolutions.co.uk", "https://www.aportsolutions.co.uk"],
+    allow_methods=["GET"],
+    allow_headers=[],
+    allow_credentials=False,
+)
 
 
 @app.on_event("startup")
